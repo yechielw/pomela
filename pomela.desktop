@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Name=Pomela
+GenericName=Remote Desktop Launcher
+Comment=Connect to your Citrix desktop with Entra SSO
+Exec=pomela --desktop
+TryExec=pomela
+Icon=pomela
+Terminal=false
+StartupNotify=false
+Categories=Network;RemoteAccess;
+Keywords=Citrix;VDI;Entra;SSO;
+Actions=Credentials;Setup;
+
+[Desktop Action Credentials]
+Name=Set credentials
+Exec=pomela credentials set --desktop
+
+[Desktop Action Setup]
+Name=Choose desktop
+Exec=pomela setup --desktop

@@ -246,22 +246,12 @@ func (s *session) launchICA(base *url.URL, r resource) ([]byte, error) {
 }
 func openICA(path, command string) error {
 	if command != "" {
-		cmd := exec.Command(command, path)
-		if e := cmd.Start(); e != nil {
-			return errors.New("cannot start configured ICA command")
-		}
-		go cmd.Wait()
-		return nil
+		return startICA(exec.Command(command, path))
 	}
 	if runtime.GOOS == "linux" {
 		for _, candidate := range []string{"wfica", "/opt/Citrix/ICAClient/wfica"} {
 			if p, e := exec.LookPath(candidate); e == nil {
-				cmd := exec.Command(p, path)
-				if e = cmd.Start(); e != nil {
-					return e
-				}
-				go cmd.Wait()
-				return nil
+				return startICA(exec.Command(p, path))
 			}
 		}
 	}
@@ -274,8 +264,28 @@ func openICA(path, command string) error {
 	default:
 		cmd = exec.Command("xdg-open", path)
 	}
-	if e := cmd.Run(); e != nil {
+	if e := startICA(cmd); e != nil {
 		return fmt.Errorf("ICA saved to %s; install Citrix Workspace or configure ica_command", path)
+	}
+	return nil
+}
+
+func startICA(cmd *exec.Cmd) error {
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("cannot start ICA client: %w", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	// Report immediate client failures, but do not wait for the remote desktop
+	// session to end. Pomela remains a one-shot launcher.
+	timer := time.NewTimer(500 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("ICA client exited during startup: %w", err)
+		}
+	case <-timer.C:
 	}
 	return nil
 }

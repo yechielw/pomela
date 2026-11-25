@@ -17,6 +17,8 @@ import (
 
 const keyringService = "pomela"
 
+var errNoCredentials = errors.New("no credentials in OS keyring for this store; run pomela credentials set or pomela credentials import-env")
+
 type credentialStore interface {
 	Set(service, account, secret string) error
 	Get(service, account string) (string, error)
@@ -63,7 +65,7 @@ func getCredentials(k credentialStore, store string) (credentials, error) {
 	}
 	secret, e := k.Get(keyringService, account)
 	if errors.Is(e, keyring.ErrNotFound) {
-		return credentials{}, errors.New("no credentials in OS keyring for this store; run pomela credentials set or pomela credentials import-env")
+		return credentials{}, errNoCredentials
 	}
 	if e != nil {
 		return credentials{}, keyringAccessError("read", e)

@@ -5,3 +5,5 @@ pomela
 *.ica
 config.json
 .pomela/
+result
+result-*

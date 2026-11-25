@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func run() error {
+func run() (runErr error) {
 	command := "connect"
 	args := os.Args[1:]
 	if len(args) > 0 && args[0] != "" && args[0][0] != '-' {
@@ -38,12 +38,10 @@ func run() error {
 		return e
 	}
 	defaultConfig := filepath.Join(root, "pomela", "config.json")
-	if _, err := os.Stat(filepath.Join(".pomela", "config.json")); err == nil {
-		defaultConfig = filepath.Join(".pomela", "config.json")
-	}
 	fs := flag.NewFlagSet("pomela "+command, flag.ContinueOnError)
 	envPath := fs.String("env", ".env", "source dotenv file for credentials import-env only")
 	configPath := fs.String("config", defaultConfig, "configuration file")
+	desktop := fs.Bool("desktop", false, "use graphical setup dialogs and error messages")
 	machine := fs.String("machine", "", "resource ID or exact display name")
 	store := fs.String("store", "", "store HTTPS URL")
 	resourcePath := fs.String("resource-path", "", "override resource listing endpoint")
@@ -60,6 +58,25 @@ func run() error {
 	}
 	if fs.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
+	}
+	ui := desktopDialogs{}
+	if *desktop {
+		defer func() {
+			if errors.Is(runErr, errDialogCancelled) {
+				runErr = nil
+			} else if runErr != nil {
+				ui.reportError(runErr)
+			}
+		}()
+	}
+	explicitConfig := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "config" {
+			explicitConfig = true
+		}
+	})
+	if !explicitConfig {
+		*configPath = defaultConfigPath(root, *desktop)
 	}
 	cfg, e := readConfig(*configPath)
 	if e != nil {
@@ -89,7 +106,11 @@ func run() error {
 		if *noninteractive {
 			return errors.New("no store configured; run pomela setup or pass --store")
 		}
-		cfg.Store, e = promptStore(os.Stdin, os.Stdout)
+		if *desktop {
+			cfg.Store, e = ui.store()
+		} else {
+			cfg.Store, e = promptStore(os.Stdin, os.Stdout)
+		}
 		if e != nil {
 			return e
 		}
@@ -99,9 +120,21 @@ func run() error {
 		fmt.Println("Store saved to", *configPath)
 	}
 	if command == "credentials" {
+		if *desktop && action == "set" {
+			c, err := ui.credentials()
+			if err != nil {
+				return err
+			}
+			return putCredentials(systemKeyring{}, cfg.Store, c)
+		}
 		return credentialCommand(action, cfg, *configPath, *envPath)
 	}
-	c, e := getCredentials(systemKeyring{}, cfg.Store)
+	var c credentials
+	if *desktop && !*noninteractive {
+		c, e = ui.getCredentials(systemKeyring{}, cfg.Store)
+	} else {
+		c, e = getCredentials(systemKeyring{}, cfg.Store)
+	}
 	if e != nil {
 		return e
 	}
@@ -135,11 +168,14 @@ func run() error {
 	if *machine != "" {
 		wanted = *machine
 	}
-	selected, e := choose(resources, wanted, !*noninteractive)
+	selected, e := choose(resources, wanted, !*desktop && !*noninteractive)
+	if *desktop && !*noninteractive && (wanted == "" || (e != nil && *machine == "")) {
+		selected, e = ui.choose(resources)
+	}
 	if e != nil {
 		return e
 	}
-	if command == "setup" || cfg.Machine == "" {
+	if command == "setup" || cfg.Machine == "" || (*desktop && *machine == "" && selected.ID != cfg.Machine) {
 		cfg.Machine = selected.ID
 		if e = saveConfig(*configPath, cfg); e != nil {
 			return e
